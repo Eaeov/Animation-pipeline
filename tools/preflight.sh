@@ -26,21 +26,35 @@ ok()   { printf "${GRN}[OK ]${NC} %s\n" "$1"; }
 bad()  { printf "${RED}[!! ]${NC} %s\n" "$1"; fail=1; }
 warn() { printf "${YEL}[?  ]${NC} %s\n" "$1"; }
 
+# 扫描范围策略:
+#   用 grep -r 扫描工作区, 但排除"永不会入库的目录"(依赖/环境/产物)。
+# 为什么不用 git ls-files 逐文件扫: 每个文件 fork 一次 grep, 大型仓库下
+#   慢到不可用 (实测 60 文件也因进程替换开销超时)。
+# 为什么必须排除依赖目录: 实测 PIL 的 ImageFont.py 内嵌 base64 字体数据
+#   里恰好含 sk- 开头长串, 被误判为 DashScope 密钥。误报比漏报更危险 ——
+#   它会让人习惯性加 --no-verify, 安全体系直接失效。
+EXCLUDES=(--exclude-dir=.git --exclude-dir=.venv --exclude-dir=venv
+          --exclude-dir=node_modules --exclude-dir=__pycache__
+          --exclude-dir=runs --exclude-dir=tools/ffmpeg
+          --exclude-dir=models --exclude-dir=.pytest_cache
+          --exclude-dir=.mypy_cache --exclude-dir=dist --exclude-dir=build
+          --exclude-dir=site-packages)
+INCLUDES=(--include="*.py" --include="*.yaml" --include="*.yml"
+          --include="*.json" --include="*.toml" --include="*.sh"
+          --include="*.env" --include="*.md" --include="*.txt"
+          --include="*.cfg" --include="*.ini")
+
 echo "============================================================"
 echo "提交前安全自查"
 echo "============================================================"
 
 # --------------------------------------------------------------------- 1
 hr
-echo "1. 密钥扫描 (当前工作区文件)"
+echo "1. 密钥扫描 (已排除依赖/产物目录)"
 # 常见密钥格式: DashScope sk-xxx / 阿里云 LTAI / GitHub token / 各类 secret
 PATTERN='(sk-[a-zA-Z0-9]{20,}|LTAI[a-zA-Z0-9]{12,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{30,}|github_pat_[a-zA-Z0-9_]{50,}|xox[baprs]-[a-zA-Z0-9-]{10,})'
 
-hits=$(grep -rInE "$PATTERN" \
-        --include="*.py" --include="*.yaml" --include="*.yml" \
-        --include="*.json" --include="*.sh" --include="*.env" \
-        --exclude-dir=.git --exclude-dir=runs --exclude-dir=tools \
-        . 2>/dev/null || true)
+hits=$(grep -rInE "$PATTERN" "${INCLUDES[@]}" "${EXCLUDES[@]}" . 2>/dev/null || true)
 
 if [ -n "$hits" ]; then
   bad "发现疑似密钥:"
@@ -53,9 +67,8 @@ fi
 hr
 echo "2. 敏感关键词扫描"
 kw=$(grep -rInE "(api_?key|password|passwd|secret|access_?token)[[:space:]]*[:=][[:space:]]*[\"'][^\"'\$]{8,}" \
-       --include="*.py" --include="*.yaml" --include="*.yml" \
-       --exclude-dir=.git --exclude-dir=runs \
-       . 2>/dev/null | grep -viE "os\.environ|getenv|\$\{|example|<your|xxx|占位|placeholder|TODO" \
+       "${INCLUDES[@]}" "${EXCLUDES[@]}" . 2>/dev/null \
+     | grep -viE "os\.environ|getenv|\$\{|example|<your|xxx|占位|placeholder|TODO" \
      || true)
 if [ -n "$kw" ]; then
   warn "以下位置疑似硬编码凭证 (请人工确认):"
