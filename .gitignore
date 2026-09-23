@@ -1,0 +1,36 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# 运行产物不入库 (体积大且可重生成)
+runs/
+!runs/.gitkeep
+
+# 素材: 原始 PV 与人设图通常有版权与体积问题 -> 不入库, 用外链/LFS
+assets/source/*
+!assets/source/.gitkeep
+assets/character/*
+!assets/character/.gitkeep
+assets/output/*
+!assets/output/.gitkeep
+
+# 本地密钥
+*.key
+secrets.yaml
+.secrets/
+
+# 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 工具: 项目内 ffmpeg 体积大, 不入库 (用 tools/setup_ffmpeg.sh 生成)
+tools/ffmpeg/
+tools/ffmpeg.zip
+tools/_x/
+tools/mirror_ok.txt
+.pytest_cache/

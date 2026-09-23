@@ -1,0 +1,31 @@
+# 默认管线配置
+# 改这里而不是改代码 (AGENTS.md 铁律 3)
+
+api:
+  base_url: "https://dashscope.aliyuncs.com"      # 北京地域; 业务空间专属域名见文档
+  model: "wan2.2-animate-mix"
+  submit_path: "/api/v1/services/aigc/image2video/video-synthesis"
+  query_path: "/api/v1/tasks/{task_id}"
+  poll_interval_s: 15
+  poll_timeout_s: 900
+  max_retries: 3
+  check_image: true
+
+# A/B 必须走同一份配置 —— 这是"可复用性"的物理保证
+clips: ["A", "B"]
+default_mode: "wan-std"       # 先用 std 跑通, pro 只跑终稿
+output_resolution: "720P"
+
+# 片段切分定义 (start/duration 由 ingest 阶段的 clip_plan 覆盖,
+# 这里只放默认值, 真实值见 configs/clips.yaml)
+ingest:
+  reencode: true
+  normalize_max_side: 1280
+  normalize_fps: 24
+
+# 人设图规整
+character:
+  max_side: 2048
+  min_side: 256
+  max_mb: 5.0
+  align_to_clip: true         # 按参考视频画幅补边, 显著影响换人质量

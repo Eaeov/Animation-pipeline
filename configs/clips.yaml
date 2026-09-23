@@ -1,0 +1,45 @@
+# 片段切分方案 —— pipeline 的"可复用性"从这里开始
+#
+# 设计原则 (对应 TASK.md 关键词拆解):
+#   - A/B 是正式评估片段, 必须同规格 (时长接近、分辨率一致、运镜复杂度可比)
+#   - C 是压力测试片段, 刻意选"困难样本" (剧烈运镜/遮挡/多人) 用于失败分析
+#   - 每段时长必须落在 (2s, 30s] 内 —— 平台硬约束
+#
+# 选片标准 (为什么选这几段):
+#   1. 含明确主角, 且主角占画幅比例适中 -> 换人成功率高的前提
+#   2. A 与 B 的运镜复杂度要"可比但不相同" -> 才能测出 pipeline 的稳定性
+#   3. 时长尽量短 (5-8s) -> 省额度 (免费额度仅 50 秒), 且便于人眼精查
+#
+# TODO(素材就绪后填写):
+#   - src_video: 原始 PV 文件路径 (放在 assets/source/)
+#   - start / duration: 精确到 0.1s
+#   - rationale: 为什么选这段 (评估时写进报告)
+
+source:
+  video: "assets/source/pv.mp4"
+  title: "TODO 作品名"
+  season: "TODO 2026年X月新番"
+  url: "TODO PV 官方来源链接"
+  downloaded_at: "TODO"
+
+clips:
+  A:
+    start: 0.0
+    duration: 6.0
+    role: "baseline"
+    complexity: "low"
+    rationale: "TODO 例如: 主角正面中景, 镜头基本静止, 用于建立 pipeline 的上限基线"
+
+  B:
+    start: 0.0
+    duration: 6.0
+    role: "baseline"
+    complexity: "low"
+    rationale: "TODO 例如: 主角近景 + 轻微推镜, 与 A 同规格不同运镜, 用于测跨片段稳定性"
+
+  C:
+    start: 0.0
+    duration: 8.0
+    role: "stress"
+    complexity: "high"
+    rationale: "TODO 例如: 快速运镜 + 手部遮挡面部, 预期失败, 用于失败案例分析"
