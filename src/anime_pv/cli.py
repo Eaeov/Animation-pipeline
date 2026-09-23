@@ -7,6 +7,9 @@
     # 环境体检
     python -m anime_pv.cli doctor
 
+    # 扫描 PV, 推荐切片方案 (素材就绪后第一步)
+    python -m anime_pv.cli scan --video assets/source/pv.mp4
+
     # 单个片段跑完整管线
     python -m anime_pv.cli run --clip A --adapter mock
 
@@ -132,14 +135,49 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # 素材
     src = cfg.assets_dir / "source"
     char = cfg.assets_dir / "character"
-    n_src = len([p for p in src.glob("*") if p.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi"}])
-    n_char = len([p for p in char.glob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}])
-    print(f"[{'OK ' if n_src else '-- '}] 原始 PV 素材: {n_src} 个 (放 assets/source/)")
-    print(f"[{'OK ' if n_char else '-- '}] 人设图素材: {n_char} 个 (放 assets/character/)")
+    vid_ext = {".mp4", ".mkv", ".mov", ".avi", ".flv", ".webm"}
+    img_ext = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+    pv_files = [p for p in src.glob("*") if p.suffix.lower() in vid_ext] if src.is_dir() else []
+    char_files = [p for p in char.glob("*") if p.suffix.lower() in img_ext] if char.is_dir() else []
+    n_src, n_char = len(pv_files), len(char_files)
+
+    if n_src:
+        print(f"[OK ] 原始 PV 素材: {n_src} 个")
+        for p in pv_files[:3]:
+            print(f"       - {p.name} ({p.stat().st_size / 1048576:.1f} MB)")
+    else:
+        print("[-- ] 原始 PV 素材: 0 个  -> 把 PV 放到 assets/source/")
+        ok = False
+
+    if n_char:
+        print(f"[OK ] 人设图素材: {n_char} 个")
+        for p in char_files[:3]:
+            print(f"       - {p.name} ({p.stat().st_size / 1024:.0f} KB)")
+    else:
+        print("[-- ] 人设图素材: 0 个  -> 把立绘放到 assets/character/ (命名 A.png / B.png)")
+        ok = False
+
+    # clips.yaml 是否还是模板
+    from .config import CONFIG_DIR
+
+    clips_yaml = CONFIG_DIR / "clips.yaml"
+    placeholder = False
+    if clips_yaml.exists():
+        txt = clips_yaml.read_text(encoding="utf-8")
+        placeholder = "TODO" in txt
+    if placeholder:
+        print("[-- ] clips.yaml 仍是模板 (含 TODO)  -> 跑 scan 生成推荐方案")
+        ok = False
+    elif clips_yaml.exists():
+        print("[OK ] clips.yaml 已填写")
 
     print("-" * 60)
-    print("结论:", "环境就绪" if ok else "存在缺项, 见上方 -- 行")
-    print("提示: 即使存在缺项, `smoke` 与 `--adapter mock` 仍可运行。")
+    if ok:
+        print("结论: 环境就绪")
+        print("下一步: python -m anime_pv.cli scan    # 扫描 PV 推荐切片")
+    else:
+        print("结论: 存在缺项, 见上方 -- 行")
+        print("提示: 即使存在缺项, `smoke` 与 `--adapter mock` 仍可运行。")
     return 0 if ok else 1
 
 
@@ -384,6 +422,49 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    """扫描 PV, 推荐切片方案 (素材就绪后的第一步)."""
+    from .analyze import render_scan, scan
+
+    cfg = PipelineConfig.load(args.config)
+    if args.video:
+        video = Path(args.video)
+    else:
+        # 默认取 assets/source/ 下的第一个视频
+        src_dir = cfg.assets_dir / "source"
+        cands = sorted(
+            p for p in src_dir.glob("*")
+            if p.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".flv"}
+        ) if src_dir.is_dir() else []
+        if not cands:
+            print(f"未找到 PV: 请指定 --video, 或把 PV 放到 {src_dir}/")
+            return 1
+        video = cands[0]
+        if len(cands) > 1:
+            print(f"发现 {len(cands)} 个视频, 使用第一个: {video.name}")
+            print(f"(如需指定: --video <path>)")
+
+    if not video.exists():
+        print(f"文件不存在: {video}")
+        return 1
+
+    print(f"扫描中... (镜头检测 + 逐镜头测量, 约 1-2 秒/镜头)")
+    result = scan(video, threshold=args.threshold)
+    print(render_scan(result, top=args.top))
+
+    if args.out:
+        import json
+
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\n详细数据已写入: {out}")
+    return 0
+
+
 # --------------------------------------------------------------------- 解析器
 
 
@@ -429,6 +510,13 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--clips", default=None)
     e.add_argument("--layers", default="L1,L2,L3", help="要跑的评估层, 如 L1,L3")
     e.set_defaults(func=cmd_eval)
+
+    sc = sub.add_parser("scan", help="扫描 PV 并推荐切片方案 (素材就绪后第一步)")
+    sc.add_argument("--video", default=None, help="PV 路径 (默认取 assets/source/ 第一个)")
+    sc.add_argument("--threshold", type=float, default=0.42, help="镜头切换灵敏度")
+    sc.add_argument("--top", type=int, default=12, help="显示前 N 个镜头")
+    sc.add_argument("--out", default=None, help="把完整 JSON 写入该路径")
+    sc.set_defaults(func=cmd_scan)
 
     return p
 
