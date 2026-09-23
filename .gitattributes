@@ -1,0 +1,12 @@
+# 统一换行符, 避免 Windows 上出现 "LF will be replaced by CRLF" 噪音
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.mp4 binary
+*.mov binary
+*.avi binary
+*.zip binary
+*.exe binary

@@ -122,7 +122,7 @@ def _mux_audio(video: Path, audio_src: Path, dest: Path) -> Path:
     """把 audio_src 的音轨接到 video 上 (视频以 video 为准)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        V._ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(video), "-i", str(audio_src),
         "-c:v", "copy", "-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0?",
         "-shortest", "-movflags", "+faststart", str(dest),
@@ -141,7 +141,7 @@ def _stack_compare(original: Path, replaced: Path, dest: Path) -> Path:
     ri = V.probe(replaced)
     w = min(oi.width, ri.width)
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        V._ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(original), "-i", str(replaced),
         "-filter_complex",
         f"[0:v]scale={w}:-2,pad={w}:ih+8:0:4:color=black[top];"

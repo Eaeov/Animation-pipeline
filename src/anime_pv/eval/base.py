@@ -44,8 +44,8 @@ class ClipPair:
     """一对"参考 vs 生成"素材, 供评估器消费."""
 
     clip_id: str
-    reference: Path | None      # 原始片段 (归一化后)
-    generated: Path | None      # 换人后成片
+    reference: Path | None = None   # 原始片段 (归一化后)
+    generated: Path | None = None   # 换人后成片
     character: Path | None = None   # 人设图
     aligned: Path | None = None     # 对齐后人设图
     ref_frames: list[Path] = field(default_factory=list)

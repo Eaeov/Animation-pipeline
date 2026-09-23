@@ -15,7 +15,9 @@ import yaml
 
 from .errors import ConfigError
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# config.py 位于 <repo>/src/anime_pv/config.py
+#   parents[0] = anime_pv/   parents[1] = src/   parents[2] = <repo>/
+REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "configs"
 
 

@@ -31,6 +31,9 @@ Thumbs.db
 # 工具: 项目内 ffmpeg 体积大, 不入库 (用 tools/setup_ffmpeg.sh 生成)
 tools/ffmpeg/
 tools/ffmpeg.zip
+tools/ff611.zip
+tools/ffmpeg-*-full_build/
+tools/ffmpeg-*/
 tools/_x/
 tools/mirror_ok.txt
 .pytest_cache/

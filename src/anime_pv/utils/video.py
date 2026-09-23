@@ -2,11 +2,18 @@
 
 依赖 ffmpeg (命令行) + OpenCV (帧级分析).
 ffmpeg 缺失时给出明确安装指引, 而不是抛晦涩的 FileNotFoundError.
+
+查找顺序 (find_ffmpeg):
+  1. 环境变量 ANIME_PV_FFMPEG_DIR 指定的 bin 目录  (CI / 自定义安装)
+  2. 项目自带 tools/ffmpeg/bin                     (setup_ffmpeg.sh 装的)
+  3. 系统 PATH
+这样"按脚本装好了却说找不到"的情况不会发生.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -14,19 +21,80 @@ from pathlib import Path
 
 from ..errors import InputValidationError, StageError
 
+# <repo>/src/anime_pv/utils/video.py -> parents[3] = <repo>
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_BUNDLED_BIN = _REPO_ROOT / "tools" / "ffmpeg" / "bin"
+
+_EXE = ".exe" if os.name == "nt" else ""
+
+
+def _looks_like_bin(d: Path, name: str) -> Path | None:
+    """目录下是否存在可用的 ffmpeg/ffprobe 可执行文件."""
+    cand = d / f"{name}{_EXE}"
+    if cand.is_file():
+        return cand
+    # 兼容没有扩展名的 POSIX 风格安装
+    cand2 = d / name
+    if cand2.is_file():
+        return cand2
+    return None
+
+
+def find_ffmpeg(name: str) -> str | None:
+    """定位 ffmpeg 或 ffprobe, 返回可执行文件路径; 找不到返回 None."""
+    env_dir = os.environ.get("ANIME_PV_FFMPEG_DIR")
+    if env_dir:
+        hit = _looks_like_bin(Path(env_dir), name)
+        if hit:
+            return str(hit)
+
+    if _BUNDLED_BIN.is_dir():
+        hit = _looks_like_bin(_BUNDLED_BIN, name)
+        if hit:
+            return str(hit)
+
+    return shutil.which(name)
+
 
 def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    return find_ffmpeg("ffmpeg") is not None and find_ffmpeg("ffprobe") is not None
+
+
+def _ff(name: str) -> str:
+    """取可执行文件路径; 缺了就抛带指引的错 (而不是裸 FileNotFoundError)."""
+    exe = find_ffmpeg(name)
+    if exe is None:
+        require_ffmpeg()
+        raise StageError(f"找不到 {name}", stage="ingest")  # 理论上不可达
+    return exe
+
+
+def ffmpeg_source() -> str:
+    """返回 ffmpeg 来源描述, 供 doctor 显示 (便于排查"到底用的是哪个")."""
+    exe = find_ffmpeg("ffmpeg")
+    if not exe:
+        return "缺失"
+    p = Path(exe).resolve()
+    try:
+        if _BUNDLED_BIN.resolve() in p.parents:
+            return f"项目自带 ({p.parent})"
+    except OSError:
+        pass
+    if os.environ.get("ANIME_PV_FFMPEG_DIR"):
+        return f"环境变量 ANIME_PV_FFMPEG_DIR ({p.parent})"
+    return f"系统 PATH ({p.parent})"
 
 
 def require_ffmpeg() -> None:
     if not ffmpeg_available():
         raise StageError(
             "未检测到 ffmpeg/ffprobe, 视频处理无法进行.\n"
-            "Windows 安装 (任选其一):\n"
+            "推荐 (项目自带, 不污染系统 PATH):\n"
+            "  bash tools/setup_ffmpeg.sh\n"
+            "其他方式:\n"
             "  winget install Gyan.FFmpeg\n"
             "  choco install ffmpeg\n"
-            "或下载解压后把 bin 目录加入 PATH.",
+            "或下载解压后设置 ANIME_PV_FFMPEG_DIR 指向其 bin 目录.",
             stage="ingest",
         )
 
@@ -61,23 +129,39 @@ class VideoInfo:
 
 
 def probe(path: Path) -> VideoInfo:
-    """用 ffprobe 读取视频元信息."""
-    require_ffmpeg()
+    """读取视频元信息.
+
+    优先 ffprobe; 若 ffprobe 异常 (崩溃/无输出/解析失败) 则回退到 OpenCV。
+    加这层兜底的原因: 部分 ffmpeg 构建存在 ffprobe 段错误问题 (见 docs/04 失败案例),
+    不能因为探测工具的缺陷让整个管线不可用。
+    """
     if not path.exists():
         raise InputValidationError(f"文件不存在: {path}", stage="ingest")
+
+    if ffmpeg_available():
+        try:
+            return _probe_ffprobe(path)
+        except (InputValidationError, ValueError, json.JSONDecodeError):
+            pass  # 落到 OpenCV 兜底
+    return _probe_opencv(path)
+
+
+def _probe_ffprobe(path: Path) -> VideoInfo:
     cmd = [
-        "ffprobe", "-v", "error",
+        _ff("ffprobe"), "-v", "error",
         "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate,nb_frames,codec_name",
         "-show_entries", "format=duration,size",
         "-of", "json", str(path),
     ]
     out = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if out.returncode != 0:
+    # 段错误时 returncode 会是异常大值 (如 3221225477 / 139), stdout 为空
+    if out.returncode != 0 or not (out.stdout or "").strip():
         raise InputValidationError(
-            f"ffprobe 解析失败: {out.stderr.strip()}", stage="ingest"
+            f"ffprobe 解析失败 (rc={out.returncode}): {out.stderr.strip()[:200]}",
+            stage="ingest",
         )
-    data = json.loads(out.stdout or "{}")
+    data = json.loads(out.stdout)
     streams = data.get("streams") or [{}]
     fmt = data.get("format") or {}
     st = streams[0]
@@ -113,6 +197,37 @@ def probe(path: Path) -> VideoInfo:
     )
 
 
+def _probe_opencv(path: Path) -> VideoInfo:
+    """OpenCV 兜底探测. 无需 ffprobe, 但精度略低 (FPS 可能不准)."""
+    try:
+        import cv2
+    except ImportError as exc:
+        raise InputValidationError(
+            f"ffprobe 不可用且未安装 OpenCV, 无法探测视频: {path}",
+            stage="ingest", cause=exc,
+        )
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise InputValidationError(f"无法打开视频: {path}", stage="ingest")
+    try:
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        nb = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    finally:
+        cap.release()
+
+    # 部分编码下 CAP_PROP_FPS 返回 0/异常, 用帧数反推
+    duration = nb / fps if fps > 1e-6 else 0.0
+    if fps <= 1e-6 or fps > 240:
+        fps = 24.0
+        duration = nb / fps if nb else 0.0
+    return VideoInfo(
+        path=path, duration=duration, width=w, height=h, fps=fps, nb_frames=nb,
+        codec="unknown(cv2)", size_mb=path.stat().st_size / (1024 * 1024),
+    )
+
+
 def cut(
     src: Path,
     dest: Path,
@@ -128,7 +243,7 @@ def cut(
     """
     require_ffmpeg()
     dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}", "-i", str(src)]
+    cmd = [ _ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}", "-i", str(src)]
     cmd += ["-t", f"{duration:.3f}"]
     if reencode:
         cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-an"]
@@ -156,7 +271,7 @@ def normalize(
     dest.parent.mkdir(parents=True, exist_ok=True)
     info = probe(src)
     vf = [f"scale='if(gt(iw,ih),min({max_side},iw),-2)':'if(gt(iw,ih),-2,min({max_side},ih))'"]
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
+    cmd = [ _ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
     cmd += ["-vf", ",".join(vf)]
     if fps:
         cmd += ["-r", str(fps)]
@@ -174,8 +289,7 @@ def extract_frame(video: Path, dest: Path, *, at: float | None = None) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if at is None:
         at = probe(video).duration / 2
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+    cmd = [ _ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-ss", f"{at:.3f}", "-i", str(video), "-frames:v", "1", str(dest),
     ]
     _run(cmd, "抽帧失败", "ingest")
@@ -186,8 +300,7 @@ def extract_frames(video: Path, dest_dir: Path, *, every_s: float = 0.5, max_fra
     """按时间间隔抽帧, 用于时序分析与 VLM 评估."""
     require_ffmpeg()
     dest_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+    cmd = [ _ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(video), "-vf", f"fps=1/{every_s}", "-frames:v", str(max_frames),
         str(dest_dir / "frame_%04d.jpg"),
     ]
@@ -217,7 +330,7 @@ def concat(parts: list[Path], dest: Path, *, crossfade_s: float = 0.0) -> Path:
             encoding="utf-8",
         )
         _run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            [ _ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
              "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(dest)],
             "拼接失败", "assemble",
         )
@@ -240,7 +353,7 @@ def concat(parts: list[Path], dest: Path, *, crossfade_s: float = 0.0) -> Path:
         prev = label
         offset += durations[i] - crossfade_s
     _run(
-        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *inputs,
+        [ _ff("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error", *inputs,
          "-filter_complex", ";".join(filter_parts), "-map", prev.strip("[]"),
          "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(dest)],
         "交叉淡化拼接失败", "assemble",

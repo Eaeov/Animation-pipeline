@@ -146,10 +146,21 @@ class FlowSmoothnessEvaluator:
 
     做法: 计算相邻帧光流的平均幅值序列, 取其变异系数 (CV)。
     平滑动作的 CV 小; 跳帧/抖动会让 CV 变大。
+
+    归一化说明 (为什么不用线性截断):
+        原实现 `100*(1 - cv/0.8)` 在 CV=0.8 就归零, 过于陡峭 —— 真实动画
+        片段的运镜本身就有变速 (推/拉/摇), CV 常在 0.6~1.5, 线性截断会让
+        指标扎堆在 0 分, 失去区分度 (冒烟测试里 passthrough 也是 0 分)。
+        改为指数饱和: score = 100 * exp(-cv / tau), tau=1.2。
+        性质: CV=0 -> 100; CV=0.6 -> 61; CV=1.2 -> 37; CV=2.4 -> 13。
+        单调、无硬截断、在常见区间保持分辨率, 但仍能惩罚剧烈抖动。
     """
 
     dim = "motion_smoothness"
     layer = "L1"
+
+    # 饱和常数: 越大越宽容。1.2 对应"CV 每增加 1.2 分数衰减到 37%"
+    TAU = 1.2
 
     def score(self, pair: ClipPair, *, out_dir: Path) -> Metric:
         if not pair.generated or not pair.generated.exists():
@@ -170,13 +181,22 @@ class FlowSmoothnessEvaluator:
             mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
             mags.append(float(mag.mean()))
         arr = np.array(mags)
-        cv = float(arr.std() / (arr.mean() + 1e-6))
-        # CV 0.4 以下视为平滑
-        score = float(np.clip(100 * (1 - cv / 0.8), 0, 100))
+        mean_motion = float(arr.mean())
+        cv = float(arr.std() / (mean_motion + 1e-6))
+
+        # 静止画面 (光流接近 0) 无平滑度可言 -> 判为 not_measured, 不用 0 冒充
+        if mean_motion < 0.05:
+            return Metric(self.dim, self.layer, None, raw_value=round(cv, 4),
+                          detail={"mean_motion": round(mean_motion, 4),
+                                  "note": "画面近似静止, 光流平滑度不适用"})
+
+        score = float(np.clip(100.0 * float(np.exp(-cv / self.TAU)), 0, 100))
         return Metric(self.dim, self.layer, score, raw_value=round(cv, 4),
-                      detail={"mean_motion": round(float(arr.mean()), 3),
+                      detail={"mean_motion": round(mean_motion, 3),
                               "std_motion": round(float(arr.std()), 3),
-                              "cv": round(cv, 4), "frames": len(grays)})
+                              "cv": round(cv, 4), "frames": len(grays),
+                              "tau": self.TAU,
+                              "normalization": "score = 100*exp(-cv/tau)"})
 
 
 class SharpnessEvaluator:

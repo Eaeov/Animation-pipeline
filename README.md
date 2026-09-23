@@ -31,10 +31,18 @@
 # 安装依赖
 pip install -r requirements.txt
 
-# 安装 ffmpeg (Windows)
-winget install Gyan.FFmpeg
-# 或使用本项目自带的 (下载后解压到 tools/ffmpeg/)
-# bash tools/setup_ffmpeg.sh
+# 安装 ffmpeg —— 推荐: 项目自带 (不污染系统 PATH, 版本已钉死为稳定的 6.1.1)
+bash tools/setup_ffmpeg.sh
+# 脚本会自动把 ffmpeg 装到 tools/ffmpeg/bin, 管线会**自动发现**它, 无需改 PATH
+#
+# 备选方式:
+#   winget install Gyan.FFmpeg
+#   choco install ffmpeg
+# 或手动下载后设置环境变量指向其 bin 目录:
+#   export ANIME_PV_FFMPEG_DIR=/path/to/ffmpeg/bin
+#
+# ⚠️ 不要用 9.0.2: 该版本 ffprobe 在 Windows 上段错误 (连 --version 都崩).
+#    详见 docs/04-交付说明.md 失败案例 4.
 
 # 配置密钥 (仅 dashscope 适配器需要)
 export DASHSCOPE_API_KEY=sk-xxxx        # Linux/macOS
@@ -49,14 +57,20 @@ python -m anime_pv.cli doctor
 ```
 
 逐项检查 Python / 依赖 / ffmpeg / 密钥 / 素材，并给出可执行的修复命令。
+ffmpeg 会显示**版本号和来源路径**（项目自带 / 系统 PATH），便于排查版本问题。
 
 ### 3. 离线自检（不需要密钥和素材，秒级完成）
 
 ```bash
+# 正常链路: 五阶段全通, 综合分应接近满分, CI ≈ 1.0
 python -m anime_pv.cli smoke
+
+# 扰动自检: 人为制造退化, 综合分应显著下降 (验证评估器真的有效)
+python -m anime_pv.cli smoke --jitter 0.6
 ```
 
-用合成素材走通全链路，验证框架完整性。
+**这两条命令的对比才是重点**：如果两者分数一样，说明评估器坏了
+（我们真的踩过这个坑，见失败案例 5）。实测区分度 **89.74 vs 28.01**。
 
 ### 4. 准备素材
 

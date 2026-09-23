@@ -75,6 +75,59 @@
 
 ---
 
+## v0.1.1 — 2026-09-23（端到端验证 + 评估器自检修复）
+
+> 触发原因：装好稳定版 ffmpeg 后跑首次**真实五阶段 + 评估**，暴露出一批
+> "离线测试查不出、只有真跑才现形"的缺陷。
+
+### 🔴 高危修复（评估可信性）
+
+- `[fix]` **`cmd_smoke` 静默丢弃 `--jitter`** — 硬编码 `jitter=0.0`，
+  导致"扰动自检"机制完全失效且不报错。`smoke --jitter 0.6` 与 `jitter=0`
+  结果完全一致（都是 89.74）。
+  — 危害：评估器的自检形同虚设，可能给出虚假的乐观结论。
+  — 修复：透传 `args.jitter`，并在 jitter>0 时打印 `[扰动自检模式]`。
+- `[fix]` **`FlowSmoothnessEvaluator` 归一化硬截断** —
+  `100*(1-cv/0.8)` 在 CV>0.8 处直接归零，正常视频也拿 0 分，指标失去分辨率。
+  — 修复：改指数饱和 `100*exp(-cv/tau)`，`tau=1.2`；画面近似静止时
+  诚实标 `not_measured`（不用 0 冒充）。
+
+### 🟡 可用性修复
+
+- `[fix]` **ffmpeg 自动发现**：`ffmpeg_available()` 原只查 PATH，
+  导致"按 `setup_ffmpeg.sh` 装进项目里了，`doctor` 却说没有"。
+  — 修复：新增 `find_ffmpeg()`，查找顺序
+  `ANIME_PV_FFMPEG_DIR` → 项目自带 `tools/ffmpeg/bin` → 系统 PATH。
+- `[fix]` **消除 8 处硬编码 `"ffmpeg"`/`"ffprobe"`**：全部改走 `_ff()`，
+  避免"探测得到但调用时 FileNotFoundError"的自相矛盾状态。
+- `[fix]` `ClipPair` 的 `reference`/`generated` 改为可选默认 None —
+  `build_pairs` 先构造再逐个 setattr，原签名会让 `eval` 直接 TypeError。
+- `[fix]` `tools/setup_ffmpeg.sh` 版本 9.0.2 → **6.1.1**
+  — 9.0.2 的 ffprobe 在本机段错误（详见 §8 失败案例 4）。
+  另在安装末尾加 `ffprobe -version` 健康自检，把"装完就崩"提前暴露。
+
+### 🟢 增强
+
+- `[enhance]` `doctor` 显示 ffmpeg **版本 + 来源路径**，并单独自检 ffprobe
+  — 便于一眼看出用的是哪个 ffmpeg（排查段错误类问题时关键）。
+- `[test]` 测试 24 → **28 项**，新增：
+  - `TestFlowSmoothnessNormalization`：归一化单调性 + 无硬截断（防 Bug 2 回归）
+  - `TestCliParamsActuallyUsed`：断言 `--jitter` 真的透传到 adapter（防 Bug 1 回归）
+- `[docs]` `04-交付说明.md` 新增**失败案例 5：评估器自检机制形同虚设**
+  — 记录"功能看起来在工作实际没生效"这类最难查的 bug，含修复前后指标对照表。
+
+### ✅ 本次验证结果
+
+| 项目 | 结果 |
+|---|---|
+| `doctor` | **环境就绪**（ffmpeg 6.1.1 项目自带，自动发现） |
+| `smoke`（jitter=0） | **五阶段全通**，综合 **89.74**，CI **1.0** |
+| `smoke --jitter 0.6` | 综合 **28.01**，psnr 1.5 / temporal 0.0 / sharpness 0.0 |
+| 区分度 | **61.7 分** — 评估器确认能检出缺陷 |
+| `pytest` | **28 passed** |
+
+---
+
 ## 待办（素材就绪后）
 
 - `[ ]` 填写 `configs/clips.yaml` 的真实切分方案

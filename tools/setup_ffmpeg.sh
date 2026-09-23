@@ -12,7 +12,11 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="$HERE/ffmpeg"
-VERSION="9.0.2"
+# 钉死 6.1.1, 不要用 latest / 9.x:
+#   实测 ffmpeg 9.0.2 (GyanD full_build) 的 ffprobe 在本机直接段错误,
+#   连 `ffprobe -version` 都崩溃 (rc=139 / 3221225477), 属该版本二进制缺陷.
+#   6.1.1 同源同架构实测正常. 详见 docs/04-交付说明.md 失败案例 4.
+VERSION="6.1.1"
 NAME="ffmpeg-${VERSION}-full_build"
 
 # 多个镜像依次尝试 (GitHub 直连在部分网络不可用)
@@ -59,6 +63,13 @@ if [ -x "$DEST/bin/ffmpeg" ] || [ -x "$DEST/bin/ffmpeg.exe" ]; then
   echo "[OK] 安装完成: $DEST/bin"
   echo "     用法: export PATH=\"$DEST/bin:\$PATH\""
   "$DEST/bin/ffmpeg" -version 2>/dev/null | head -1 || true
+  # 健康自检: 光有可执行文件不代表能用 (9.0.2 就是装得上但 ffprobe 段错误)
+  if "$DEST/bin/ffprobe" -version >/dev/null 2>&1; then
+    echo "[OK] ffprobe 自检通过"
+  else
+    echo "[WARN] ffprobe 自检失败 (可能段错误), 请更换 ffmpeg 版本" >&2
+    echo "       已知 9.0.2 full_build 有此问题, 建议 6.1.1" >&2
+  fi
 else
   echo "[FAIL] 解压后未找到 ffmpeg 可执行文件, 请检查 $DEST" >&2
   exit 1
