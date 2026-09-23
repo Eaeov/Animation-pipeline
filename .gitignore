@@ -1,39 +1,207 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
+# =====================================================================
+# anime-pv-pipeline .gitignore
+#
+# 原则: 凡是"不该公开"或"可重新生成"的东西一律不入库。
+# 分四类: ① 密钥凭证  ② 版权素材  ③ 大体积产物  ④ 环境噪声
+# =====================================================================
+
+
+# ---------------------------------------------------------------------
+# ① 密钥与凭证 —— 这一类最危险, 一旦推上公开仓库就等于泄漏
+# ---------------------------------------------------------------------
+
+# 环境变量文件 (所有变体)
 .env
+.env.*
+!.env.example
+*.env
+.envrc
 
-# 运行产物不入库 (体积大且可重生成)
-runs/
-!runs/.gitkeep
+# 任何名字里带 key/secret/token/credential 的文件
+*.key
+*.pem
+*.p12
+*.pfx
+*_key.txt
+*_secret.txt
+secrets.yaml
+secrets.yml
+secret.yaml
+credentials.json
+credentials.yaml
+auth.json
+token.json
 
-# 素材: 原始 PV 与人设图通常有版权与体积问题 -> 不入库, 用外链/LFS
+# 配置目录
+.secrets/
+.credentials/
+.config/secrets/
+
+# 云服务 CLI 凭证
+.aws/
+.aliyun/
+.dashscope/
+
+# 注意: configs/ 下的 yaml 是"参数"不是"凭证" —— 它们入库。
+# 但必须保证里面只放默认值, 真实 API Key 只从环境变量读 (见 config.py)。
+
+
+# ---------------------------------------------------------------------
+# ② 版权素材 —— 动画 PV 与人设图版权归原权利人, 不主张也不分发
+# ---------------------------------------------------------------------
+
 assets/source/*
 !assets/source/.gitkeep
+
 assets/character/*
 !assets/character/.gitkeep
+
 assets/output/*
 !assets/output/.gitkeep
 
-# 本地密钥
-*.key
-secrets.yaml
-.secrets/
+# 兜底: 任何位置的视频/音频文件 (可能是原片片段)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.flv
+*.webm
+*.wmv
+*.m4v
+*.mp3
+*.wav
+*.aac
+*.flac
+!runs/.gitkeep
 
-# 系统
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
+# 但允许小的演示用图片 (如评估证据帧) —— 如需入库,
+# 请手动 git add -f, 并在 docs/素材来源与授权.md 记录来源。
 
-# 工具: 项目内 ffmpeg 体积大, 不入库 (用 tools/setup_ffmpeg.sh 生成)
+
+# ---------------------------------------------------------------------
+# ③ 大体积产物 —— 可重新生成, 入库徒增仓库体积
+# ---------------------------------------------------------------------
+
+# 运行产物 (含成片、对照视频、抽帧、报告)
+runs/
+!runs/.gitkeep
+
+# 项目内 ffmpeg (约 400MB, 用 tools/setup_ffmpeg.sh 生成)
 tools/ffmpeg/
 tools/ffmpeg.zip
 tools/ff611.zip
 tools/ffmpeg-*-full_build/
 tools/ffmpeg-*/
+tools/ff*.zip
 tools/_x/
 tools/mirror_ok.txt
+
+# 模型权重 (若后续引入 insightface 等)
+models/
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# 数据集与缓存
+data/
+datasets/
+cache/
+.cache/
+
+# 压缩包
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+!uv.lock
+
+
+# ---------------------------------------------------------------------
+# ④ 环境与噪声
+# ---------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# 测试与类型检查缓存
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# 编辑器与 IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# 临时文件
+*.tmp
+*.bak
+*.orig
+*.rej
+*.log
+!docs/**/*.log
+
+# 本地实验 (个人试跑, 不该入库)
+_local/
+_sandbox/
+scratch/
+sandbox/
+
+# 本地覆盖配置 —— 这是"真实 API Key 最可能被放的地方", 必须挡住
+#   configs/local.yaml / configs/_local.yaml / configs/default.local.yaml ...
+configs/local*.yaml
+configs/local*.yml
+configs/_local*.yaml
+configs/_local*.yml
+configs/*.local.yaml
+configs/*.local.yml
+configs/*_local.yaml
+configs/*_local.yml
+configs/*.private.yaml
+configs/*.private.yml
+configs/*secret*
+configs/*.key.yaml
+
+# 一般性的 local/private 覆盖
+*.local.yaml
+*.local.yml
+*.private.yaml
+*.private.yml
+*_local.yaml
+*_local.yml
+!configs/default.yaml
+!configs/clips.yaml

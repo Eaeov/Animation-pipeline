@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# =====================================================================
+# git pre-commit 钩子 —— 提交前自动跑安全自查
+#
+# 安装方式 (在项目根目录执行一次):
+#   bash tools/install_hooks.sh
+#
+# 为什么用钩子而不是"记得手动跑":
+#   人会忘。而"忘了跑一次安全检查"的代价可能是密钥泄漏到公开仓库。
+#   钩子把检查变成提交的必经步骤 —— 不通过就提交不了。
+#
+# 紧急跳过 (不推荐, 仅在你确认脚本误报时用):
+#   git commit --no-verify
+# =====================================================================
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -z "$REPO_ROOT" ] && exit 0
+
+SCRIPT="$REPO_ROOT/tools/preflight.sh"
+[ ! -f "$SCRIPT" ] && exit 0
+
+# 只检查"即将提交"的内容, 避免因无关文件阻塞
+echo ""
+bash "$SCRIPT"
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+  echo ""
+  echo "❌ 提交被安全自查拦截。"
+  echo ""
+  echo "   如果确认是误报, 可以用以下方式跳过 (仅在确认安全时):"
+  echo "     git commit --no-verify"
+  echo ""
+  echo "   如果是真的有问题, 请先处理, 或:"
+  echo "     bash tools/preflight.sh --fix"
+  echo ""
+  exit 1
+fi
+exit 0
